@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/elvinchan/kvdb"
+	"github.com/elvinchan/kvdb/internal"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
@@ -21,8 +22,8 @@ var (
 )
 
 type rdb struct {
-	db        *gorm.DB
-	autoClean bool
+	db     *gorm.DB
+	option *internal.Option
 }
 
 type rdbNode struct {
@@ -39,12 +40,12 @@ const (
 )
 
 func NewDB(driver int, dsn string, opts ...kvdb.DBOption) (kvdb.KVDB, error) {
-	var d kvdb.DB
+	o := internal.InitOption()
 	for _, opt := range opts {
-		opt(&d)
+		opt(o)
 	}
 	logLevel := logger.Silent
-	if d.Debug {
+	if o.Debug {
 		logLevel = logger.Info
 	}
 	gormLogger := logger.New(
@@ -74,15 +75,18 @@ func NewDB(driver int, dsn string, opts ...kvdb.DBOption) (kvdb.KVDB, error) {
 	}
 	err = db.AutoMigrate(&rdbNode{})
 	return &rdb{
-		db:        db,
-		autoClean: d.AutoClean,
+		db:     db,
+		option: o,
 	}, err
 }
 
 func (g *rdb) Get(key string, opts ...kvdb.GetOption) (*kvdb.Node, error) {
-	var gt kvdb.Getter
+	var gt internal.Getter
 	for _, opt := range opts {
 		opt(&gt)
+	}
+	if gt.Children && gt.Limit == 0 {
+		gt.Limit = g.option.DefaultLimit
 	}
 	now := time.Now()
 	row := rdbNode{Key: key}
@@ -96,7 +100,7 @@ func (g *rdb) Get(key string, opts ...kvdb.GetOption) (*kvdb.Node, error) {
 	node := kvdb.Node{
 		Value: row.Value,
 	}
-	if gt.Limit > 0 {
+	if gt.Children {
 		var rows []rdbNode
 		err = g.db.Where("parent_key = ?", key).
 			Where("key > ?", gt.Start).
@@ -115,9 +119,12 @@ func (g *rdb) Get(key string, opts ...kvdb.GetOption) (*kvdb.Node, error) {
 }
 
 func (g *rdb) GetMulti(keys []string, opts ...kvdb.GetOption) ([]kvdb.Node, error) {
-	var gt kvdb.Getter
+	var gt internal.Getter
 	for _, opt := range opts {
 		opt(&gt)
+	}
+	if gt.Children && gt.Limit == 0 {
+		gt.Limit = g.option.DefaultLimit
 	}
 	now := time.Now()
 	var rows []rdbNode
@@ -128,18 +135,17 @@ func (g *rdb) GetMulti(keys []string, opts ...kvdb.GetOption) ([]kvdb.Node, erro
 		return nil, err
 	}
 
-	bareStartKey := kvdb.IsBareKey(gt.Start)
-	parentStartKey := kvdb.ParseParentKey(gt.Start)
+	bareStartKey := g.option.IsBareKey(gt.Start)
+	parentStartKey := g.option.ParentBareKey(gt.Start)
 	nodes := make([]kvdb.Node, len(rows))
 	for _, row := range rows {
 		node := kvdb.Node{
 			Value: row.Value,
 		}
-		if gt.Limit > 0 &&
-			(bareStartKey || parentStartKey == row.Key) {
+		if gt.Children && (bareStartKey || parentStartKey == row.Key) {
 			var rows []rdbNode
 			err = g.db.Where("parent_key = ?", row.Key).
-				Where("key > ?", kvdb.FullKey(gt.Start, row.Key)).
+				Where("key > ?", g.option.FullKey(gt.Start, row.Key)).
 				Where("expire_at > ?", now).
 				Limit(gt.Limit).
 				Find(&rows).Error
@@ -157,14 +163,14 @@ func (g *rdb) GetMulti(keys []string, opts ...kvdb.GetOption) ([]kvdb.Node, erro
 }
 
 func (g *rdb) Set(key, value string, opts ...kvdb.SetOption) error {
-	var st kvdb.Setter
+	var st internal.Setter
 	st.ExpireAt = maxDatetime
 	for _, opt := range opts {
 		opt(&st)
 	}
 	row := rdbNode{
 		Key:       key,
-		ParentKey: kvdb.ParseParentKey(key),
+		ParentKey: g.option.ParentBareKey(key),
 		Value:     value,
 		ExpireAt:  st.ExpireAt,
 	}
@@ -174,7 +180,7 @@ func (g *rdb) Set(key, value string, opts ...kvdb.SetOption) error {
 }
 
 func (g *rdb) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
-	var st kvdb.Setter
+	var st internal.Setter
 	st.ExpireAt = maxDatetime
 	for _, opt := range opts {
 		opt(&st)
@@ -186,7 +192,7 @@ func (g *rdb) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
 	for i := 0; i < len(kvPairs)/2; i++ {
 		rows = append(rows, rdbNode{
 			Key:       kvPairs[i*2],
-			ParentKey: kvdb.ParseParentKey(kvPairs[i*2]),
+			ParentKey: g.option.ParentBareKey(kvPairs[i*2]),
 			Value:     kvPairs[i*2+1],
 			ExpireAt:  st.ExpireAt,
 		})
@@ -198,7 +204,7 @@ func (g *rdb) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
 
 // DEL node:key SREM children:key
 func (g *rdb) Delete(key string, opts ...kvdb.DeleteOption) error {
-	var dt kvdb.Deleter
+	var dt internal.Deleter
 	for _, opt := range opts {
 		opt(&dt)
 	}
@@ -210,7 +216,7 @@ func (g *rdb) Delete(key string, opts ...kvdb.DeleteOption) error {
 }
 
 func (g *rdb) DeleteMulti(keys []string, opts ...kvdb.DeleteOption) error {
-	var dt kvdb.Deleter
+	var dt internal.Deleter
 	for _, opt := range opts {
 		opt(&dt)
 	}

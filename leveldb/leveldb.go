@@ -8,25 +8,26 @@ import (
 	"time"
 
 	"github.com/elvinchan/kvdb"
+	"github.com/elvinchan/kvdb/internal"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
 type levelDB struct {
-	db        *leveldb.DB
-	autoClean bool
+	db     *leveldb.DB
+	option *internal.Option
 }
 
 func NewDB(path string, opts ...kvdb.DBOption) (kvdb.KVDB, error) {
-	var d kvdb.DB
+	o := internal.InitOption()
 	for _, opt := range opts {
-		opt(&d)
+		opt(o)
 	}
 	db, err := leveldb.OpenFile(path, nil)
 	return &levelDB{
-		db:        db,
-		autoClean: d.AutoClean,
+		db:     db,
+		option: o,
 	}, err
 }
 
@@ -36,9 +37,12 @@ type levelDBNode struct {
 }
 
 func (l *levelDB) Get(key string, opts ...kvdb.GetOption) (*kvdb.Node, error) {
-	var gt kvdb.Getter
+	var gt internal.Getter
 	for _, opt := range opts {
 		opt(&gt)
+	}
+	if gt.Children && gt.Limit == 0 {
+		gt.Limit = l.option.DefaultLimit
 	}
 	node, deleteKeys, err := l.get(key, gt)
 	if err != nil {
@@ -51,9 +55,12 @@ func (l *levelDB) Get(key string, opts ...kvdb.GetOption) (*kvdb.Node, error) {
 }
 
 func (l *levelDB) GetMulti(keys []string, opts ...kvdb.GetOption) ([]kvdb.Node, error) {
-	var gt kvdb.Getter
+	var gt internal.Getter
 	for _, opt := range opts {
 		opt(&gt)
+	}
+	if gt.Children && gt.Limit == 0 {
+		gt.Limit = l.option.DefaultLimit
 	}
 	var (
 		nodes      []kvdb.Node
@@ -73,7 +80,7 @@ func (l *levelDB) GetMulti(keys []string, opts ...kvdb.GetOption) ([]kvdb.Node, 
 	return nodes, l.DeleteMulti(deleteKeys, kvdb.DeleteChildren(true))
 }
 
-func (l *levelDB) get(key string, gt kvdb.Getter) (*kvdb.Node, []string, error) {
+func (l *levelDB) get(key string, gt internal.Getter) (*kvdb.Node, []string, error) {
 	v, err := l.db.Get(l.mask(key), nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
@@ -100,12 +107,11 @@ func (l *levelDB) get(key string, gt kvdb.Getter) (*kvdb.Node, []string, error) 
 		return nil, nil, err
 	}
 
-	bareStartKey := kvdb.IsBareKey(gt.Start)
-	parentStartKey := kvdb.ParseParentKey(gt.Start)
-	if gt.Limit > 0 &&
-		(bareStartKey || parentStartKey == key) {
+	bareStartKey := l.option.IsBareKey(gt.Start)
+	parentStartKey := l.option.ParentBareKey(gt.Start)
+	if gt.Limit > 0 && (bareStartKey || parentStartKey == key) {
 		node.Children = make(map[string]string, gt.Limit)
-		iter := l.db.NewIterator(l.leveldbRange(key, kvdb.BareKey(gt.Start)), nil)
+		iter := l.db.NewIterator(l.leveldbRange(key, l.option.BareKey(gt.Start)), nil)
 		defer iter.Release()
 		var i int
 		for iter.Next() {
@@ -128,7 +134,7 @@ func (l *levelDB) get(key string, gt kvdb.Getter) (*kvdb.Node, []string, error) 
 }
 
 func (l *levelDB) leveldbRange(key, start string) *util.Range {
-	prefix := l.mask(key + kvdb.KeyPathSep + start)
+	prefix := l.mask(key + l.option.KeyPathSep + start)
 	var limit []byte
 	for i := len(prefix) - 1; i >= 0; i-- {
 		c := prefix[i]
@@ -143,7 +149,7 @@ func (l *levelDB) leveldbRange(key, start string) *util.Range {
 }
 
 func (l *levelDB) Set(key, value string, opts ...kvdb.SetOption) error {
-	var st kvdb.Setter
+	var st internal.Setter
 	for _, opt := range opts {
 		opt(&st)
 	}
@@ -155,7 +161,7 @@ func (l *levelDB) Set(key, value string, opts ...kvdb.SetOption) error {
 }
 
 func (l *levelDB) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
-	var st kvdb.Setter
+	var st internal.Setter
 	for _, opt := range opts {
 		opt(&st)
 	}
@@ -178,7 +184,7 @@ func (l *levelDB) Exist(key string) (bool, error) {
 }
 
 func (l *levelDB) Delete(key string, opts ...kvdb.DeleteOption) error {
-	var dt kvdb.Deleter
+	var dt internal.Deleter
 	for _, opt := range opts {
 		opt(&dt)
 	}
@@ -196,7 +202,7 @@ func (l *levelDB) Delete(key string, opts ...kvdb.DeleteOption) error {
 }
 
 func (l *levelDB) DeleteMulti(keys []string, opts ...kvdb.DeleteOption) error {
-	var dt kvdb.Deleter
+	var dt internal.Deleter
 	for _, opt := range opts {
 		opt(&dt)
 	}
@@ -254,10 +260,10 @@ func (levelDB) decode(data []byte) (*levelDBNode, error) {
 	return &node, err
 }
 
-func (levelDB) mask(key string) []byte {
+func (l *levelDB) mask(key string) []byte {
 	var buffer bytes.Buffer
 	buffer.WriteString("node:")
-	buffer.WriteString(strconv.Itoa(strings.Count(key, kvdb.KeyPathSep)))
+	buffer.WriteString(strconv.Itoa(strings.Count(key, l.option.KeyPathSep)))
 	buffer.WriteString(":")
 	buffer.WriteString(key)
 	return buffer.Bytes()

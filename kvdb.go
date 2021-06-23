@@ -1,13 +1,9 @@
 package kvdb
 
 import (
-	"strings"
 	"time"
-)
 
-const (
-	KeyPathSep   = "."
-	DefaultLimit = 10
+	"github.com/elvinchan/kvdb/internal"
 )
 
 type Node struct {
@@ -16,43 +12,28 @@ type Node struct {
 	// ExpireAt time.Time         `json:"-"` // unix seconds
 }
 
-type Getter struct {
-	Start string // 可以是full key, 也可以是bare key， bare key 支持每个key查询对应的children
-	Limit int
-}
-
-type GetOption func(g *Getter)
+type GetOption func(g *internal.Getter)
 
 func GetChildren(start string, limit int) GetOption {
-	return func(g *Getter) {
-		if limit <= 0 {
-			limit = DefaultLimit
-		}
+	return func(g *internal.Getter) {
+		g.Children = true
 		g.Start = start
 		g.Limit = limit
 	}
 }
 
-type Setter struct {
-	ExpireAt time.Time
-}
-
-type SetOption func(s *Setter)
+type SetOption func(s *internal.Setter)
 
 func SetExpire(at time.Time) SetOption {
-	return func(s *Setter) {
+	return func(s *internal.Setter) {
 		s.ExpireAt = at
 	}
 }
 
-type Deleter struct {
-	Children bool
-}
-
-type DeleteOption func(d *Deleter)
+type DeleteOption func(d *internal.Deleter)
 
 func DeleteChildren(b bool) DeleteOption {
-	return func(d *Deleter) {
+	return func(d *internal.Deleter) {
 		d.Children = true
 	}
 }
@@ -77,45 +58,28 @@ type KVDB interface {
 	Close() error
 }
 
-func ParseParentKey(key string) string {
-	segs := strings.Split(key, KeyPathSep)
-	if len(segs) > 1 {
-		return segs[len(segs)-2]
-	}
-	return ""
-}
-
-func BareKey(key string) string {
-	idx := strings.LastIndex(key, KeyPathSep)
-	if idx == -1 {
-		return ""
-	}
-	return key[idx:]
-}
-
-func IsBareKey(key string) bool {
-	return !strings.Contains(key, KeyPathSep)
-}
-
-func FullKey(bareKey, parentKey string) string {
-	return parentKey + KeyPathSep + bareKey
-}
-
-type DB struct {
-	AutoClean bool
-	Debug     bool
-}
-
-type DBOption func(d *DB)
+type DBOption func(d *internal.Option)
 
 func AutoClean() DBOption {
-	return func(d *DB) {
+	return func(d *internal.Option) {
 		d.AutoClean = true
 	}
 }
 
 func Debug() DBOption {
-	return func(d *DB) {
+	return func(d *internal.Option) {
 		d.Debug = true
+	}
+}
+
+func KeyPathSep(s string) DBOption {
+	return func(d *internal.Option) {
+		d.KeyPathSep = s
+	}
+}
+
+func DefaultLimit(l int) DBOption {
+	return func(d *internal.Option) {
+		d.DefaultLimit = l
 	}
 }
