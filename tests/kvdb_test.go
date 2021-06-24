@@ -105,7 +105,7 @@ func TestGetSet(t *testing.T) {
 				t.Fail()
 			}
 
-			err = db.Delete("group", kvdb.DeleteChildren(true))
+			err = db.Delete("group", kvdb.DeleteChildren())
 			if err != nil {
 				t.Error(err)
 				t.Fail()

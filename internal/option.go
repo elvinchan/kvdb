@@ -12,6 +12,8 @@ type Option struct {
 	Debug        bool
 }
 
+type DBOption func(d *Option)
+
 func InitOption() *Option {
 	return &Option{
 		KeyPathSep:   ".",
@@ -48,14 +50,20 @@ func (db *Option) FullKey(bareKey, parentKey string) string {
 
 type Getter struct {
 	Children bool
-	Start    string // 可以是full key, 也可以是bare key， bare key 支持每个key查询对应的children
+	Start    string
 	Limit    int
 }
+
+type GetOption func(g *Getter)
 
 type Setter struct {
 	ExpireAt time.Time
 }
 
+type SetOption func(s *Setter)
+
 type Deleter struct {
 	Children bool
 }
+
+type DeleteOption func(d *Deleter)

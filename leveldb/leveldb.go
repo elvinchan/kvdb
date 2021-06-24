@@ -19,7 +19,7 @@ type levelDB struct {
 	option *internal.Option
 }
 
-func NewDB(path string, opts ...kvdb.DBOption) (kvdb.KVDB, error) {
+func NewDB(path string, opts ...internal.DBOption) (kvdb.KVDB, error) {
 	o := internal.InitOption()
 	for _, opt := range opts {
 		opt(o)
@@ -36,7 +36,8 @@ type levelDBNode struct {
 	ExpireAt time.Time `msgpack:"expire_at,omitempty"`
 }
 
-func (l *levelDB) Get(key string, opts ...kvdb.GetOption) (*kvdb.Node, error) {
+func (l *levelDB) Get(key string, opts ...internal.GetOption,
+) (*kvdb.Node, error) {
 	var gt internal.Getter
 	for _, opt := range opts {
 		opt(&gt)
@@ -49,12 +50,13 @@ func (l *levelDB) Get(key string, opts ...kvdb.GetOption) (*kvdb.Node, error) {
 		return nil, err
 	}
 	if len(deleteKeys) > 0 {
-		err = l.DeleteMulti(deleteKeys, kvdb.DeleteChildren(true))
+		err = l.DeleteMulti(deleteKeys)
 	}
 	return node, err
 }
 
-func (l *levelDB) GetMulti(keys []string, opts ...kvdb.GetOption) ([]kvdb.Node, error) {
+func (l *levelDB) GetMulti(keys []string, opts ...internal.GetOption,
+) (map[string]kvdb.Node, error) {
 	var gt internal.Getter
 	for _, opt := range opts {
 		opt(&gt)
@@ -63,7 +65,7 @@ func (l *levelDB) GetMulti(keys []string, opts ...kvdb.GetOption) ([]kvdb.Node, 
 		gt.Limit = l.option.DefaultLimit
 	}
 	var (
-		nodes      []kvdb.Node
+		v          map[string]kvdb.Node
 		deleteKeys []string
 	)
 	for i := range keys {
@@ -71,16 +73,17 @@ func (l *levelDB) GetMulti(keys []string, opts ...kvdb.GetOption) ([]kvdb.Node, 
 		if err != nil {
 			return nil, err
 		}
-		nodes = append(nodes, *node)
+		v[keys[i]] = *node
 		deleteKeys = append(deleteKeys, dks...)
 	}
 	if len(deleteKeys) == 0 {
-		return nodes, nil
+		return v, nil
 	}
-	return nodes, l.DeleteMulti(deleteKeys, kvdb.DeleteChildren(true))
+	return v, l.DeleteMulti(deleteKeys)
 }
 
-func (l *levelDB) get(key string, gt internal.Getter) (*kvdb.Node, []string, error) {
+func (l *levelDB) get(key string, gt internal.Getter,
+) (*kvdb.Node, []string, error) {
 	v, err := l.db.Get(l.mask(key), nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
@@ -96,7 +99,9 @@ func (l *levelDB) get(key string, gt internal.Getter) (*kvdb.Node, []string, err
 			return "", err
 		}
 		if !n.ExpireAt.IsZero() && !n.ExpireAt.After(now) {
-			deleteKeys = append(deleteKeys, key)
+			if l.option.AutoClean {
+				deleteKeys = append(deleteKeys, key)
+			}
 			return "", nil
 		}
 		return n.Value, nil
@@ -111,7 +116,10 @@ func (l *levelDB) get(key string, gt internal.Getter) (*kvdb.Node, []string, err
 	parentStartKey := l.option.ParentBareKey(gt.Start)
 	if gt.Limit > 0 && (bareStartKey || parentStartKey == key) {
 		node.Children = make(map[string]string, gt.Limit)
-		iter := l.db.NewIterator(l.leveldbRange(key, l.option.BareKey(gt.Start)), nil)
+		iter := l.db.NewIterator(
+			l.leveldbRange(key, l.option.BareKey(gt.Start)),
+			nil,
+		)
 		defer iter.Release()
 		var i int
 		for iter.Next() {
@@ -148,7 +156,7 @@ func (l *levelDB) leveldbRange(key, start string) *util.Range {
 	return &util.Range{Start: nil, Limit: nil}
 }
 
-func (l *levelDB) Set(key, value string, opts ...kvdb.SetOption) error {
+func (l *levelDB) Set(key, value string, opts ...internal.SetOption) error {
 	var st internal.Setter
 	for _, opt := range opts {
 		opt(&st)
@@ -160,7 +168,7 @@ func (l *levelDB) Set(key, value string, opts ...kvdb.SetOption) error {
 	return l.db.Put(l.mask(key), v, nil)
 }
 
-func (l *levelDB) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
+func (l *levelDB) SetMulti(kvPairs []string, opts ...internal.SetOption) error {
 	var st internal.Setter
 	for _, opt := range opts {
 		opt(&st)
@@ -183,7 +191,7 @@ func (l *levelDB) Exist(key string) (bool, error) {
 	return l.db.Has(l.mask(key), nil)
 }
 
-func (l *levelDB) Delete(key string, opts ...kvdb.DeleteOption) error {
+func (l *levelDB) Delete(key string, opts ...internal.DeleteOption) error {
 	var dt internal.Deleter
 	for _, opt := range opts {
 		opt(&dt)
@@ -201,7 +209,7 @@ func (l *levelDB) Delete(key string, opts ...kvdb.DeleteOption) error {
 	return l.db.Delete(l.mask(key), nil)
 }
 
-func (l *levelDB) DeleteMulti(keys []string, opts ...kvdb.DeleteOption) error {
+func (l *levelDB) DeleteMulti(keys []string, opts ...internal.DeleteOption) error {
 	var dt internal.Deleter
 	for _, opt := range opts {
 		opt(&dt)
@@ -224,10 +232,6 @@ func (l *levelDB) DeleteMulti(keys []string, opts ...kvdb.DeleteOption) error {
 	return l.db.Write(batch, nil)
 }
 
-func (l *levelDB) Close() error {
-	return l.db.Close()
-}
-
 func (l *levelDB) Cleanup() error {
 	batch := new(leveldb.Batch)
 	now := time.Now()
@@ -244,6 +248,10 @@ func (l *levelDB) Cleanup() error {
 		batch.Delete(iter.Key())
 	}
 	return l.db.Write(batch, nil)
+}
+
+func (l *levelDB) Close() error {
+	return l.db.Close()
 }
 
 func (levelDB) encode(value string, expireAt time.Time) ([]byte, error) {

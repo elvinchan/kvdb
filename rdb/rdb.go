@@ -39,7 +39,7 @@ const (
 	DriverPostgres
 )
 
-func NewDB(driver int, dsn string, opts ...kvdb.DBOption) (kvdb.KVDB, error) {
+func NewDB(driver int, dsn string, opts ...internal.DBOption) (kvdb.KVDB, error) {
 	o := internal.InitOption()
 	for _, opt := range opts {
 		opt(o)
@@ -73,14 +73,19 @@ func NewDB(driver int, dsn string, opts ...kvdb.DBOption) (kvdb.KVDB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = db.AutoMigrate(&rdbNode{})
+	if err = db.AutoMigrate(&rdbNode{}); err != nil {
+		return nil, err
+	}
+	if o.AutoClean {
+		// TODO: auto clean in another goroutine
+	}
 	return &rdb{
 		db:     db,
 		option: o,
-	}, err
+	}, nil
 }
 
-func (g *rdb) Get(key string, opts ...kvdb.GetOption) (*kvdb.Node, error) {
+func (g *rdb) Get(key string, opts ...internal.GetOption) (*kvdb.Node, error) {
 	var gt internal.Getter
 	for _, opt := range opts {
 		opt(&gt)
@@ -118,7 +123,8 @@ func (g *rdb) Get(key string, opts ...kvdb.GetOption) (*kvdb.Node, error) {
 	return &node, nil
 }
 
-func (g *rdb) GetMulti(keys []string, opts ...kvdb.GetOption) ([]kvdb.Node, error) {
+func (g *rdb) GetMulti(keys []string, opts ...internal.GetOption,
+) (map[string]kvdb.Node, error) {
 	var gt internal.Getter
 	for _, opt := range opts {
 		opt(&gt)
@@ -137,7 +143,7 @@ func (g *rdb) GetMulti(keys []string, opts ...kvdb.GetOption) ([]kvdb.Node, erro
 
 	bareStartKey := g.option.IsBareKey(gt.Start)
 	parentStartKey := g.option.ParentBareKey(gt.Start)
-	nodes := make([]kvdb.Node, len(rows))
+	v := make(map[string]kvdb.Node, len(rows))
 	for _, row := range rows {
 		node := kvdb.Node{
 			Value: row.Value,
@@ -157,12 +163,12 @@ func (g *rdb) GetMulti(keys []string, opts ...kvdb.GetOption) ([]kvdb.Node, erro
 				node.Children[rows[i].Key] = rows[i].Value
 			}
 		}
-		nodes = append(nodes, node)
+		v[row.Key] = node
 	}
-	return nodes, nil
+	return v, nil
 }
 
-func (g *rdb) Set(key, value string, opts ...kvdb.SetOption) error {
+func (g *rdb) Set(key, value string, opts ...internal.SetOption) error {
 	var st internal.Setter
 	st.ExpireAt = maxDatetime
 	for _, opt := range opts {
@@ -179,7 +185,7 @@ func (g *rdb) Set(key, value string, opts ...kvdb.SetOption) error {
 	}).Create(&row).Error
 }
 
-func (g *rdb) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
+func (g *rdb) SetMulti(kvPairs []string, opts ...internal.SetOption) error {
 	var st internal.Setter
 	st.ExpireAt = maxDatetime
 	for _, opt := range opts {
@@ -202,8 +208,7 @@ func (g *rdb) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
 	}).Create(&rows).Error
 }
 
-// DEL node:key SREM children:key
-func (g *rdb) Delete(key string, opts ...kvdb.DeleteOption) error {
+func (g *rdb) Delete(key string, opts ...internal.DeleteOption) error {
 	var dt internal.Deleter
 	for _, opt := range opts {
 		opt(&dt)
@@ -215,7 +220,7 @@ func (g *rdb) Delete(key string, opts ...kvdb.DeleteOption) error {
 	return query.Delete(&rdbNode{}).Error
 }
 
-func (g *rdb) DeleteMulti(keys []string, opts ...kvdb.DeleteOption) error {
+func (g *rdb) DeleteMulti(keys []string, opts ...internal.DeleteOption) error {
 	var dt internal.Deleter
 	for _, opt := range opts {
 		opt(&dt)
@@ -233,11 +238,10 @@ func (g *rdb) Exist(key string) (bool, error) {
 	return cnt > 0, err
 }
 
-func (g *rdb) Close() error {
-	return nil
-}
-
-// Cleanup removes expired keys
 func (g *rdb) Cleanup() error {
 	return g.db.Where("expire_at <= ?", time.Now()).Error
+}
+
+func (g *rdb) Close() error {
+	return nil
 }
