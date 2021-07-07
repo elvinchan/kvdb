@@ -22,8 +22,10 @@ var (
 )
 
 type rdb struct {
-	db     *gorm.DB
-	option *internal.Option
+	db      *gorm.DB
+	option  *internal.Option
+	loadRec *internal.LoadRec
+	close   chan struct{}
 }
 
 type rdbNode struct {
@@ -76,13 +78,20 @@ func NewDB(driver int, dsn string, opts ...internal.DBOption) (kvdb.KVDB, error)
 	if err = db.AutoMigrate(&rdbNode{}); err != nil {
 		return nil, err
 	}
-	if o.AutoClean {
-		// TODO: auto clean in another goroutine
+	v := rdb{
+		db:      db,
+		option:  o,
+		loadRec: internal.DefaultLoadRec(),
+		close:   make(chan struct{}),
 	}
-	return &rdb{
-		db:     db,
-		option: o,
-	}, nil
+	if o.AutoClean {
+		go v.loadRec.StartClean(func() {
+			if err := v.Cleanup(); err != nil {
+				log.Println("cleanup error when auto clean", err)
+			}
+		}, v.close)
+	}
+	return &v, nil
 }
 
 func (g *rdb) Get(key string, opts ...internal.GetOption) (*kvdb.Node, error) {
@@ -94,6 +103,7 @@ func (g *rdb) Get(key string, opts ...internal.GetOption) (*kvdb.Node, error) {
 		gt.Limit = g.option.DefaultLimit
 	}
 	now := time.Now()
+	defer g.hookReq(time.Since(now))
 	row := rdbNode{Key: key}
 	err := g.db.Where("expire_at > ?", now).Take(&row).Error
 	if err != nil {
@@ -133,6 +143,7 @@ func (g *rdb) GetMulti(keys []string, opts ...internal.GetOption,
 		gt.Limit = g.option.DefaultLimit
 	}
 	now := time.Now()
+	defer g.hookReq(time.Since(now))
 	var rows []rdbNode
 	err := g.db.Where("expire_at > ?", now).
 		Where("key IN ?", keys).
@@ -174,6 +185,8 @@ func (g *rdb) Set(key, value string, opts ...internal.SetOption) error {
 	for _, opt := range opts {
 		opt(&st)
 	}
+	now := time.Now()
+	defer g.hookReq(time.Since(now))
 	row := rdbNode{
 		Key:       key,
 		ParentKey: g.option.ParentBareKey(key),
@@ -194,6 +207,8 @@ func (g *rdb) SetMulti(kvPairs []string, opts ...internal.SetOption) error {
 	if len(kvPairs)%2 != 0 {
 		return errors.New("invalid key value pairs count")
 	}
+	now := time.Now()
+	defer g.hookReq(time.Since(now))
 	var rows []rdbNode
 	for i := 0; i < len(kvPairs)/2; i++ {
 		rows = append(rows, rdbNode{
@@ -213,6 +228,8 @@ func (g *rdb) Delete(key string, opts ...internal.DeleteOption) error {
 	for _, opt := range opts {
 		opt(&dt)
 	}
+	now := time.Now()
+	defer g.hookReq(time.Since(now))
 	query := g.db.Where("key = ?", key)
 	if dt.Children {
 		query.Or("parent_key = ?", key)
@@ -221,10 +238,15 @@ func (g *rdb) Delete(key string, opts ...internal.DeleteOption) error {
 }
 
 func (g *rdb) DeleteMulti(keys []string, opts ...internal.DeleteOption) error {
+	if len(keys) == 0 {
+		return nil
+	}
 	var dt internal.Deleter
 	for _, opt := range opts {
 		opt(&dt)
 	}
+	now := time.Now()
+	defer g.hookReq(time.Since(now))
 	query := g.db.Where("key IN ?", keys)
 	if dt.Children {
 		query.Or("parent_key IN ?", keys)
@@ -233,6 +255,8 @@ func (g *rdb) DeleteMulti(keys []string, opts ...internal.DeleteOption) error {
 }
 
 func (g *rdb) Exist(key string) (bool, error) {
+	now := time.Now()
+	defer g.hookReq(time.Since(now))
 	var cnt int64
 	err := g.db.Model(&rdbNode{}).Where("key = ?", key).Count(&cnt).Error
 	return cnt > 0, err
@@ -243,5 +267,12 @@ func (g *rdb) Cleanup() error {
 }
 
 func (g *rdb) Close() error {
+	close(g.close)
 	return nil
+}
+
+func (g *rdb) hookReq(score time.Duration) {
+	if g.option.AutoClean {
+		g.loadRec.HookReq(int64(score))
+	}
 }

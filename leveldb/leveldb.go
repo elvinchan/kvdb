@@ -3,6 +3,7 @@ package leveldb
 import (
 	"bytes"
 	"errors"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -15,8 +16,10 @@ import (
 )
 
 type levelDB struct {
-	db     *leveldb.DB
-	option *internal.Option
+	db      *leveldb.DB
+	option  *internal.Option
+	loadRec *internal.LoadRec
+	close   chan struct{}
 }
 
 func NewDB(path string, opts ...internal.DBOption) (kvdb.KVDB, error) {
@@ -25,10 +28,20 @@ func NewDB(path string, opts ...internal.DBOption) (kvdb.KVDB, error) {
 		opt(o)
 	}
 	db, err := leveldb.OpenFile(path, nil)
-	return &levelDB{
-		db:     db,
-		option: o,
-	}, err
+	v := levelDB{
+		db:      db,
+		option:  o,
+		loadRec: internal.DefaultLoadRec(),
+		close:   make(chan struct{}),
+	}
+	if o.AutoClean {
+		go v.loadRec.StartClean(func() {
+			if err := v.Cleanup(); err != nil {
+				log.Println("cleanup error when auto clean", err)
+			}
+		}, v.close)
+	}
+	return &v, err
 }
 
 type levelDBNode struct {
@@ -45,12 +58,14 @@ func (l *levelDB) Get(key string, opts ...internal.GetOption,
 	if gt.Children && gt.Limit == 0 {
 		gt.Limit = l.option.DefaultLimit
 	}
-	node, deleteKeys, err := l.get(key, gt)
+	now := time.Now()
+	defer l.hookReq(time.Since(now))
+	node, deleteKeys, err := l.get(key, &gt)
 	if err != nil {
 		return nil, err
 	}
 	if len(deleteKeys) > 0 {
-		err = l.DeleteMulti(deleteKeys)
+		err = l.deleteMulti(deleteKeys, nil)
 	}
 	return node, err
 }
@@ -64,25 +79,28 @@ func (l *levelDB) GetMulti(keys []string, opts ...internal.GetOption,
 	if gt.Children && gt.Limit == 0 {
 		gt.Limit = l.option.DefaultLimit
 	}
+	now := time.Now()
+	defer l.hookReq(time.Since(now))
 	var (
 		v          map[string]kvdb.Node
 		deleteKeys []string
 	)
 	for i := range keys {
-		node, dks, err := l.get(keys[i], gt)
+		node, dks, err := l.get(keys[i], &gt)
 		if err != nil {
 			return nil, err
 		}
 		v[keys[i]] = *node
 		deleteKeys = append(deleteKeys, dks...)
 	}
-	if len(deleteKeys) == 0 {
-		return v, nil
+	var err error
+	if len(deleteKeys) > 0 {
+		err = l.deleteMulti(deleteKeys, nil)
 	}
-	return v, l.DeleteMulti(deleteKeys)
+	return v, err
 }
 
-func (l *levelDB) get(key string, gt internal.Getter,
+func (l *levelDB) get(key string, gt *internal.Getter,
 ) (*kvdb.Node, []string, error) {
 	v, err := l.db.Get(l.mask(key), nil)
 	if err != nil {
@@ -161,6 +179,8 @@ func (l *levelDB) Set(key, value string, opts ...internal.SetOption) error {
 	for _, opt := range opts {
 		opt(&st)
 	}
+	now := time.Now()
+	defer l.hookReq(time.Since(now))
 	v, err := l.encode(value, st.ExpireAt)
 	if err != nil {
 		return err
@@ -176,6 +196,8 @@ func (l *levelDB) SetMulti(kvPairs []string, opts ...internal.SetOption) error {
 	if len(kvPairs)%2 != 0 {
 		return errors.New("invalid key value pairs count")
 	}
+	now := time.Now()
+	defer l.hookReq(time.Since(now))
 	batch := new(leveldb.Batch)
 	for i := 0; i < len(kvPairs)/2; i++ {
 		v, err := l.encode(kvPairs[i*2+1], st.ExpireAt)
@@ -188,6 +210,8 @@ func (l *levelDB) SetMulti(kvPairs []string, opts ...internal.SetOption) error {
 }
 
 func (l *levelDB) Exist(key string) (bool, error) {
+	now := time.Now()
+	defer l.hookReq(time.Since(now))
 	return l.db.Has(l.mask(key), nil)
 }
 
@@ -196,7 +220,13 @@ func (l *levelDB) Delete(key string, opts ...internal.DeleteOption) error {
 	for _, opt := range opts {
 		opt(&dt)
 	}
-	if dt.Children {
+	now := time.Now()
+	defer l.hookReq(time.Since(now))
+	return l.delete(key, &dt)
+}
+
+func (l *levelDB) delete(key string, dt *internal.Deleter) error {
+	if dt != nil && dt.Children {
 		batch := new(leveldb.Batch)
 		batch.Delete(l.mask(key))
 		iter := l.db.NewIterator(l.leveldbRange(key, ""), nil)
@@ -214,13 +244,22 @@ func (l *levelDB) DeleteMulti(keys []string, opts ...internal.DeleteOption) erro
 	for _, opt := range opts {
 		opt(&dt)
 	}
-	if len(keys) == 1 {
-		return l.Delete(keys[0], opts...)
+	if len(keys) == 0 {
+		return nil
 	}
+	now := time.Now()
+	defer l.hookReq(time.Since(now))
+	if len(keys) == 1 {
+		return l.delete(keys[0], &dt)
+	}
+	return l.deleteMulti(keys, &dt)
+}
+
+func (l *levelDB) deleteMulti(keys []string, dt *internal.Deleter) error {
 	batch := new(leveldb.Batch)
 	for _, key := range keys {
 		batch.Delete(l.mask(key))
-		if !dt.Children {
+		if dt == nil || !dt.Children {
 			continue
 		}
 		iter := l.db.NewIterator(l.leveldbRange(key, ""), nil)
@@ -251,7 +290,14 @@ func (l *levelDB) Cleanup() error {
 }
 
 func (l *levelDB) Close() error {
+	close(l.close)
 	return l.db.Close()
+}
+
+func (l *levelDB) hookReq(score time.Duration) {
+	if l.option.AutoClean {
+		l.loadRec.HookReq(int64(score))
+	}
 }
 
 func (levelDB) encode(value string, expireAt time.Time) ([]byte, error) {
