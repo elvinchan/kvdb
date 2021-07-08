@@ -21,6 +21,14 @@ func InitOption() *Option {
 	}
 }
 
+func (db *Option) ParentKey(key string) string {
+	idx := strings.LastIndex(key, db.KeyPathSep)
+	if idx == -1 {
+		return ""
+	}
+	return key[:idx]
+}
+
 func (db *Option) ParentBareKey(key string) string {
 	segs := strings.Split(key, db.KeyPathSep)
 	if len(segs) > 1 {

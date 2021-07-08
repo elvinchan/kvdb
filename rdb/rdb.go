@@ -152,17 +152,17 @@ func (g *rdb) GetMulti(keys []string, opts ...internal.GetOption,
 		return nil, err
 	}
 
-	bareStartKey := g.option.IsBareKey(gt.Start)
-	parentStartKey := g.option.ParentBareKey(gt.Start)
+	isBareStartKey := g.option.IsBareKey(gt.Start)
+	parentStartKey := g.option.ParentKey(gt.Start)
 	v := make(map[string]kvdb.Node, len(rows))
 	for _, row := range rows {
 		node := kvdb.Node{
 			Value: row.Value,
 		}
-		if gt.Children && (bareStartKey || parentStartKey == row.Key) {
+		if gt.Children && (isBareStartKey || parentStartKey == row.Key) {
 			var rows []rdbNode
 			err = g.db.Where("parent_key = ?", row.Key).
-				Where("key > ?", g.option.FullKey(gt.Start, row.Key)).
+				Where("key > ?", g.option.FullKey(g.option.BareKey(gt.Start), row.Key)).
 				Where("expire_at > ?", now).
 				Limit(gt.Limit).
 				Find(&rows).Error
@@ -189,7 +189,7 @@ func (g *rdb) Set(key, value string, opts ...internal.SetOption) error {
 	defer g.hookReq(time.Since(now))
 	row := rdbNode{
 		Key:       key,
-		ParentKey: g.option.ParentBareKey(key),
+		ParentKey: g.option.ParentKey(key),
 		Value:     value,
 		ExpireAt:  st.ExpireAt,
 	}
@@ -213,7 +213,7 @@ func (g *rdb) SetMulti(kvPairs []string, opts ...internal.SetOption) error {
 	for i := 0; i < len(kvPairs)/2; i++ {
 		rows = append(rows, rdbNode{
 			Key:       kvPairs[i*2],
-			ParentKey: g.option.ParentBareKey(kvPairs[i*2]),
+			ParentKey: g.option.ParentKey(kvPairs[i*2]),
 			Value:     kvPairs[i*2+1],
 			ExpireAt:  st.ExpireAt,
 		})

@@ -82,7 +82,7 @@ func (l *levelDB) GetMulti(keys []string, opts ...internal.GetOption,
 	now := time.Now()
 	defer l.hookReq(time.Since(now))
 	var (
-		v          map[string]kvdb.Node
+		v          = make(map[string]kvdb.Node, len(keys))
 		deleteKeys []string
 	)
 	for i := range keys {
@@ -90,7 +90,9 @@ func (l *levelDB) GetMulti(keys []string, opts ...internal.GetOption,
 		if err != nil {
 			return nil, err
 		}
-		v[keys[i]] = *node
+		if node != nil {
+			v[keys[i]] = *node
+		}
 		deleteKeys = append(deleteKeys, dks...)
 	}
 	var err error
@@ -130,12 +132,12 @@ func (l *levelDB) get(key string, gt *internal.Getter,
 		return nil, nil, err
 	}
 
-	bareStartKey := l.option.IsBareKey(gt.Start)
-	parentStartKey := l.option.ParentBareKey(gt.Start)
-	if gt.Limit > 0 && (bareStartKey || parentStartKey == key) {
+	isBareStartKey := l.option.IsBareKey(gt.Start)
+	parentStartKey := l.option.ParentKey(gt.Start)
+	if gt.Children && (isBareStartKey || parentStartKey == key) {
 		node.Children = make(map[string]string, gt.Limit)
 		iter := l.db.NewIterator(
-			l.leveldbRange(key, l.option.BareKey(gt.Start)),
+			l.childRange(key, l.option.BareKey(gt.Start)),
 			nil,
 		)
 		defer iter.Release()
@@ -151,7 +153,7 @@ func (l *levelDB) get(key string, gt *internal.Getter,
 			}
 			node.Children[k] = v
 			i++
-			if i >= gt.Limit {
+			if gt.Limit > 0 && i >= gt.Limit {
 				break
 			}
 		}
@@ -159,19 +161,20 @@ func (l *levelDB) get(key string, gt *internal.Getter,
 	return &node, deleteKeys, nil
 }
 
-func (l *levelDB) leveldbRange(key, start string) *util.Range {
-	prefix := l.mask(key + l.option.KeyPathSep + start)
+// childRange generate LevelDB's Range for iterator
+func (l *levelDB) childRange(parentKey, startBareKey string) *util.Range {
+	start := l.mask(parentKey + l.option.KeyPathSep + startBareKey)
 	var limit []byte
-	for i := len(prefix) - 1; i >= 0; i-- {
-		c := prefix[i]
+	for i := len(start) - 1; i >= 0; i-- {
+		c := start[i]
 		if c < 0xff {
 			limit = make([]byte, i+1)
-			copy(limit, prefix)
+			copy(limit, start)
 			limit[i] = c + 1
 			break
 		}
 	}
-	return &util.Range{Start: nil, Limit: nil}
+	return &util.Range{Start: start, Limit: limit}
 }
 
 func (l *levelDB) Set(key, value string, opts ...internal.SetOption) error {
@@ -229,7 +232,7 @@ func (l *levelDB) delete(key string, dt *internal.Deleter) error {
 	if dt != nil && dt.Children {
 		batch := new(leveldb.Batch)
 		batch.Delete(l.mask(key))
-		iter := l.db.NewIterator(l.leveldbRange(key, ""), nil)
+		iter := l.db.NewIterator(l.childRange(key, ""), nil)
 		for iter.Next() {
 			batch.Delete(iter.Key())
 		}
@@ -262,7 +265,7 @@ func (l *levelDB) deleteMulti(keys []string, dt *internal.Deleter) error {
 		if dt == nil || !dt.Children {
 			continue
 		}
-		iter := l.db.NewIterator(l.leveldbRange(key, ""), nil)
+		iter := l.db.NewIterator(l.childRange(key, ""), nil)
 		for iter.Next() {
 			batch.Delete(iter.Key())
 		}
