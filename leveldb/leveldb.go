@@ -161,19 +161,25 @@ func (l *levelDB) get(key string, gt *internal.Getter,
 	return &node, deleteKeys, nil
 }
 
-// childRange generate LevelDB's Range for iterator
-func (l *levelDB) childRange(parentKey, startBareKey string) *util.Range {
-	start := l.mask(parentKey + l.option.KeyPathSep + startBareKey)
-	var limit []byte
-	for i := len(start) - 1; i >= 0; i-- {
-		c := start[i]
-		if c < 0xff {
-			limit = make([]byte, i+1)
-			copy(limit, start)
-			limit[i] = c + 1
+func nextBytes(key []byte) []byte {
+	for i := len(key) - 1; i >= 0; i-- {
+		if key[i] < 0xff {
+			key[i] = key[i] + 1
 			break
 		}
 	}
+	return key
+}
+
+// childRange generate LevelDB's Range for iterator
+func (l *levelDB) childRange(parentKey, startBareKey string) *util.Range {
+	startBare := []byte(startBareKey)
+	if startBareKey != "" {
+		startBare = nextBytes(startBare)
+	}
+	parent := []byte(parentKey)
+	start := l.maskBytes(parent, startBare)
+	limit := l.maskBytes(nextBytes(parent), []byte{})
 	return &util.Range{Start: start, Limit: limit}
 }
 
@@ -320,10 +326,26 @@ func (levelDB) decode(data []byte) (*levelDBNode, error) {
 func (l *levelDB) mask(key string) []byte {
 	var buffer bytes.Buffer
 	buffer.WriteString("node:")
-	buffer.WriteString(strconv.Itoa(strings.Count(key, l.option.KeyPathSep)))
+	buffer.WriteString(strconv.Itoa(strings.Count(key, l.option.KeyPathSep) + 1))
 	buffer.WriteString(":")
 	buffer.WriteString(key)
 	return buffer.Bytes()
+}
+
+func (l *levelDB) maskBytes(keyParts ...[]byte) []byte {
+	var level int
+	for _, kp := range keyParts {
+		level += bytes.Count(kp, []byte(l.option.KeyPathSep)) + 1
+	}
+	var buffer bytes.Buffer
+	buffer.WriteString("node:")
+	buffer.WriteString(strconv.Itoa(level))
+	buffer.WriteString(":")
+	for _, kp := range keyParts {
+		buffer.Write(kp)
+		buffer.WriteString(l.option.KeyPathSep)
+	}
+	return buffer.Bytes()[:buffer.Len()-1]
 }
 
 func (levelDB) unmask(key []byte) string {
