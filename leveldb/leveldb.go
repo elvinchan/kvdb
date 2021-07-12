@@ -17,13 +17,13 @@ import (
 
 type levelDB struct {
 	db      *leveldb.DB
-	option  *internal.Option
+	option  *kvdb.Option
 	loadRec *internal.LoadRec
 	close   chan struct{}
 }
 
-func NewDB(path string, opts ...internal.DBOption) (kvdb.KVDB, error) {
-	o := internal.InitOption()
+func NewDB(path string, opts ...kvdb.DBOption) (kvdb.KVDB, error) {
+	o := kvdb.InitOption()
 	for _, opt := range opts {
 		opt(o)
 	}
@@ -49,9 +49,9 @@ type levelDBNode struct {
 	ExpireAt time.Time `msgpack:"expire_at,omitempty"`
 }
 
-func (l *levelDB) Get(key string, opts ...internal.GetOption,
+func (l *levelDB) Get(key string, opts ...kvdb.GetOption,
 ) (*kvdb.Node, error) {
-	var gt internal.Getter
+	var gt kvdb.Getter
 	for _, opt := range opts {
 		opt(&gt)
 	}
@@ -70,9 +70,9 @@ func (l *levelDB) Get(key string, opts ...internal.GetOption,
 	return node, err
 }
 
-func (l *levelDB) GetMulti(keys []string, opts ...internal.GetOption,
+func (l *levelDB) GetMulti(keys []string, opts ...kvdb.GetOption,
 ) (map[string]kvdb.Node, error) {
-	var gt internal.Getter
+	var gt kvdb.Getter
 	for _, opt := range opts {
 		opt(&gt)
 	}
@@ -102,7 +102,7 @@ func (l *levelDB) GetMulti(keys []string, opts ...internal.GetOption,
 	return v, err
 }
 
-func (l *levelDB) get(key string, gt *internal.Getter,
+func (l *levelDB) get(key string, gt *kvdb.Getter,
 ) (*kvdb.Node, []string, error) {
 	v, err := l.db.Get(l.mask(key), nil)
 	if err != nil {
@@ -183,8 +183,8 @@ func (l *levelDB) childRange(parentKey, startBareKey string) *util.Range {
 	return &util.Range{Start: start, Limit: limit}
 }
 
-func (l *levelDB) Set(key, value string, opts ...internal.SetOption) error {
-	var st internal.Setter
+func (l *levelDB) Set(key, value string, opts ...kvdb.SetOption) error {
+	var st kvdb.Setter
 	for _, opt := range opts {
 		opt(&st)
 	}
@@ -197,8 +197,8 @@ func (l *levelDB) Set(key, value string, opts ...internal.SetOption) error {
 	return l.db.Put(l.mask(key), v, nil)
 }
 
-func (l *levelDB) SetMulti(kvPairs []string, opts ...internal.SetOption) error {
-	var st internal.Setter
+func (l *levelDB) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
+	var st kvdb.Setter
 	for _, opt := range opts {
 		opt(&st)
 	}
@@ -224,8 +224,8 @@ func (l *levelDB) Exist(key string) (bool, error) {
 	return l.db.Has(l.mask(key), nil)
 }
 
-func (l *levelDB) Delete(key string, opts ...internal.DeleteOption) error {
-	var dt internal.Deleter
+func (l *levelDB) Delete(key string, opts ...kvdb.DeleteOption) error {
+	var dt kvdb.Deleter
 	for _, opt := range opts {
 		opt(&dt)
 	}
@@ -234,7 +234,7 @@ func (l *levelDB) Delete(key string, opts ...internal.DeleteOption) error {
 	return l.delete(key, &dt)
 }
 
-func (l *levelDB) delete(key string, dt *internal.Deleter) error {
+func (l *levelDB) delete(key string, dt *kvdb.Deleter) error {
 	if dt != nil && dt.Children {
 		batch := new(leveldb.Batch)
 		batch.Delete(l.mask(key))
@@ -248,8 +248,8 @@ func (l *levelDB) delete(key string, dt *internal.Deleter) error {
 	return l.db.Delete(l.mask(key), nil)
 }
 
-func (l *levelDB) DeleteMulti(keys []string, opts ...internal.DeleteOption) error {
-	var dt internal.Deleter
+func (l *levelDB) DeleteMulti(keys []string, opts ...kvdb.DeleteOption) error {
+	var dt kvdb.Deleter
 	for _, opt := range opts {
 		opt(&dt)
 	}
@@ -264,7 +264,7 @@ func (l *levelDB) DeleteMulti(keys []string, opts ...internal.DeleteOption) erro
 	return l.deleteMulti(keys, &dt)
 }
 
-func (l *levelDB) deleteMulti(keys []string, dt *internal.Deleter) error {
+func (l *levelDB) deleteMulti(keys []string, dt *kvdb.Deleter) error {
 	batch := new(leveldb.Batch)
 	for _, key := range keys {
 		batch.Delete(l.mask(key))

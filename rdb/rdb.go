@@ -23,7 +23,7 @@ var (
 
 type rdb struct {
 	db      *gorm.DB
-	option  *internal.Option
+	option  *kvdb.Option
 	loadRec *internal.LoadRec
 	close   chan struct{}
 }
@@ -41,8 +41,8 @@ const (
 	DriverPostgres
 )
 
-func NewDB(driver int, dsn string, opts ...internal.DBOption) (kvdb.KVDB, error) {
-	o := internal.InitOption()
+func NewDB(driver int, dsn string, opts ...kvdb.DBOption) (kvdb.KVDB, error) {
+	o := kvdb.InitOption()
 	for _, opt := range opts {
 		opt(o)
 	}
@@ -94,8 +94,8 @@ func NewDB(driver int, dsn string, opts ...internal.DBOption) (kvdb.KVDB, error)
 	return &v, nil
 }
 
-func (g *rdb) Get(key string, opts ...internal.GetOption) (*kvdb.Node, error) {
-	var gt internal.Getter
+func (g *rdb) Get(key string, opts ...kvdb.GetOption) (*kvdb.Node, error) {
+	var gt kvdb.Getter
 	for _, opt := range opts {
 		opt(&gt)
 	}
@@ -133,9 +133,9 @@ func (g *rdb) Get(key string, opts ...internal.GetOption) (*kvdb.Node, error) {
 	return &node, nil
 }
 
-func (g *rdb) GetMulti(keys []string, opts ...internal.GetOption,
+func (g *rdb) GetMulti(keys []string, opts ...kvdb.GetOption,
 ) (map[string]kvdb.Node, error) {
-	var gt internal.Getter
+	var gt kvdb.Getter
 	for _, opt := range opts {
 		opt(&gt)
 	}
@@ -179,8 +179,8 @@ func (g *rdb) GetMulti(keys []string, opts ...internal.GetOption,
 	return v, nil
 }
 
-func (g *rdb) Set(key, value string, opts ...internal.SetOption) error {
-	var st internal.Setter
+func (g *rdb) Set(key, value string, opts ...kvdb.SetOption) error {
+	var st kvdb.Setter
 	st.ExpireAt = maxDatetime
 	for _, opt := range opts {
 		opt(&st)
@@ -198,8 +198,8 @@ func (g *rdb) Set(key, value string, opts ...internal.SetOption) error {
 	}).Create(&row).Error
 }
 
-func (g *rdb) SetMulti(kvPairs []string, opts ...internal.SetOption) error {
-	var st internal.Setter
+func (g *rdb) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
+	var st kvdb.Setter
 	st.ExpireAt = maxDatetime
 	for _, opt := range opts {
 		opt(&st)
@@ -223,8 +223,8 @@ func (g *rdb) SetMulti(kvPairs []string, opts ...internal.SetOption) error {
 	}).Create(&rows).Error
 }
 
-func (g *rdb) Delete(key string, opts ...internal.DeleteOption) error {
-	var dt internal.Deleter
+func (g *rdb) Delete(key string, opts ...kvdb.DeleteOption) error {
+	var dt kvdb.Deleter
 	for _, opt := range opts {
 		opt(&dt)
 	}
@@ -237,11 +237,11 @@ func (g *rdb) Delete(key string, opts ...internal.DeleteOption) error {
 	return query.Delete(&rdbNode{}).Error
 }
 
-func (g *rdb) DeleteMulti(keys []string, opts ...internal.DeleteOption) error {
+func (g *rdb) DeleteMulti(keys []string, opts ...kvdb.DeleteOption) error {
 	if len(keys) == 0 {
 		return nil
 	}
-	var dt internal.Deleter
+	var dt kvdb.Deleter
 	for _, opt := range opts {
 		opt(&dt)
 	}
