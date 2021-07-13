@@ -263,7 +263,7 @@ func (g *rdb) Exist(key string) (bool, error) {
 }
 
 func (g *rdb) Cleanup() error {
-	return g.db.Where("expire_at <= ?", time.Now()).Error
+	return g.db.Where("expire_at <= ?", time.Now()).Delete(&rdbNode{}).Error
 }
 
 func (g *rdb) Close() error {
