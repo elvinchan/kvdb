@@ -3,11 +3,15 @@ package tests
 import (
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/elvinchan/kvdb"
 )
 
-var DefaultLimit = 2
+var (
+	DefaultLimit = 2
+	ExpireAfter  = time.Millisecond * 100
+)
 
 func TestGetSet(t *testing.T, newDB func() (kvdb.KVDB, error)) {
 	kvs := []string{
@@ -265,6 +269,109 @@ func TestGetSet(t *testing.T, newDB func() (kvdb.KVDB, error)) {
 					}
 				}
 			})
+		}
+	})
+
+	t.Run("WithExpire", func(t *testing.T) {
+		db, err := newDB()
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			err := db.Close()
+			if err != nil {
+				panic(err)
+			}
+		}()
+		err = db.Set(kvs[0], kvs[1], kvdb.SetExpire(time.Now().Add(ExpireAfter)))
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+
+		rst, err := db.Get(kvs[0])
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+		if rst == nil {
+			t.Errorf("result not right, expect not nil")
+			t.Fail()
+		}
+
+		time.Sleep(ExpireAfter * 2)
+		rst, err = db.Get(kvs[0])
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+		if rst != nil {
+			t.Errorf("result not right, expect nil")
+			t.Fail()
+		}
+	})
+
+	t.Run("MultiWithExpire", func(t *testing.T) {
+		db, err := newDB()
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			err := db.Close()
+			if err != nil {
+				panic(err)
+			}
+		}()
+		err = db.SetMulti(kvs[:4], kvdb.SetExpire(time.Now().Add(ExpireAfter)))
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+		err = db.SetMulti(kvs[4:], kvdb.SetExpire(time.Now().Add(time.Minute)))
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+
+		var keys []string
+		for i := 0; i < len(kvs); i += 2 {
+			keys = append(keys, kvs[i])
+		}
+		rsts, err := db.GetMulti(keys)
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+		if len(rsts) != len(kvs)/2 {
+			t.Errorf("length of results not right, expect %v, got %v",
+				len(kvs)/2, len(rsts))
+			t.Fail()
+		}
+		for i := 0; i < len(kvs); i += 2 {
+			if rsts[kvs[i]].Value != kvs[i+1] {
+				t.Errorf("value not right, expect %s, got %s",
+					kvs[i+1], rsts[kvs[i]].Value)
+				t.Fail()
+			}
+		}
+
+		time.Sleep(ExpireAfter * 2)
+		rsts, err = db.GetMulti(keys)
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+		if len(rsts) != (len(kvs)-4)/2 {
+			t.Errorf("length of results not right, expect %v, got %v",
+				(len(kvs)-4)/2, len(rsts))
+			t.Fail()
+		}
+		for i := 4; i < len(kvs); i += 2 {
+			if rsts[kvs[i]].Value != kvs[i+1] {
+				t.Errorf("value not right, expect %s, got %s",
+					kvs[i+1], rsts[kvs[i]].Value)
+				t.Fail()
+			}
 		}
 	})
 }

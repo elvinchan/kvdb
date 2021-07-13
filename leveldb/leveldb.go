@@ -113,23 +113,27 @@ func (l *levelDB) get(key string, gt *kvdb.Getter,
 	}
 	var deleteKeys []string
 	now := time.Now()
-	retrive := func(key string, data []byte) (string, error) {
+	retrive := func(key string, data []byte) (*string, error) {
 		n, err := l.decode(data)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if !n.ExpireAt.IsZero() && !n.ExpireAt.After(now) {
 			if l.option.AutoClean {
 				deleteKeys = append(deleteKeys, key)
 			}
-			return "", nil
+			return nil, nil
 		}
-		return n.Value, nil
+		return &n.Value, nil
 	}
-	var node kvdb.Node
-	node.Value, err = retrive(key, v)
+	vp, err := retrive(key, v)
 	if err != nil {
 		return nil, nil, err
+	} else if vp == nil {
+		return nil, nil, nil
+	}
+	node := kvdb.Node{
+		Value: *vp,
 	}
 
 	isBareStartKey := l.option.IsBareKey(gt.Start)
@@ -144,14 +148,13 @@ func (l *levelDB) get(key string, gt *kvdb.Getter,
 		var i int
 		for iter.Next() {
 			k := l.unmask(iter.Key())
-			v, err := retrive(k, iter.Value())
+			vp, err := retrive(k, iter.Value())
 			if err != nil {
 				return nil, nil, err
-			}
-			if v == "" {
+			} else if vp == nil {
 				continue
 			}
-			node.Children[k] = v
+			node.Children[k] = *vp
 			i++
 			if gt.Limit > 0 && i >= gt.Limit {
 				break
