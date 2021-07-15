@@ -57,21 +57,21 @@ func (db *Option) FullKey(bareKey, parentKey string) string {
 }
 
 type Getter struct {
-	Children bool
-	Start    string
-	Limit    int
+	Children bool   `json:"children"`
+	Start    string `json:"start"`
+	Limit    int    `json:"limit"`
 }
 
 type GetOption func(g *Getter)
 
 type Setter struct {
-	ExpireAt time.Time
+	ExpireAt time.Time `json:"expireAt"`
 }
 
 type SetOption func(s *Setter)
 
 type Deleter struct {
-	Children bool
+	Children bool `json:"children"`
 }
 
 type DeleteOption func(d *Deleter)

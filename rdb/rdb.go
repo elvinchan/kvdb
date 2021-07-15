@@ -181,9 +181,11 @@ func (g *rdb) GetMulti(keys []string, opts ...kvdb.GetOption,
 
 func (g *rdb) Set(key, value string, opts ...kvdb.SetOption) error {
 	var st kvdb.Setter
-	st.ExpireAt = maxDatetime
 	for _, opt := range opts {
 		opt(&st)
+	}
+	if st.ExpireAt.IsZero() {
+		st.ExpireAt = maxDatetime
 	}
 	now := time.Now()
 	defer g.hookReq(time.Since(now))
@@ -200,9 +202,11 @@ func (g *rdb) Set(key, value string, opts ...kvdb.SetOption) error {
 
 func (g *rdb) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
 	var st kvdb.Setter
-	st.ExpireAt = maxDatetime
 	for _, opt := range opts {
 		opt(&st)
+	}
+	if st.ExpireAt.IsZero() {
+		st.ExpireAt = maxDatetime
 	}
 	if len(kvPairs)%2 != 0 {
 		return errors.New("invalid key value pairs count")
