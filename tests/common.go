@@ -148,10 +148,15 @@ func TestGetSet(t *testing.T, newDB func() (kvdb.KVDB, error)) {
 			{0, "group.g.child1", -1, 2, 3},
 			{0, "group.g.child1", 0, 2, 2},
 			{0, "group.g.child1", 1, 2, 1},
+			{0, "child1", -1, 2, 3},
+			{0, "child1", 0, 2, 2},
+			{0, "child1", 1, 2, 1},
 			{2, "", -1, 0, 0},
 			{3, "", 2, 5, 2},
 			{3, "group.g.child3.grandchild2", 2, 7, 1},
 			{3, "group.g.child3.grandchild3", -1, 0, 0},
+			{3, "grandchild2", 2, 7, 1},
+			{3, "grandchild3", -1, 0, 0},
 		}
 
 		for i, c := range cases {
@@ -172,7 +177,7 @@ func TestGetSet(t *testing.T, newDB func() (kvdb.KVDB, error)) {
 					for j := c.KeyRstIndex; j < c.KeyRstIndex+c.KeyRstLength; j++ {
 						if rst.Children[kvs[j*2]] != kvs[j*2+1] {
 							t.Errorf("value not right, expect %s, got %s",
-								kvs[i*2+1], rst.Children[kvs[j*2]])
+								kvs[j*2+1], rst.Children[kvs[j*2]])
 							t.Fail()
 						}
 					}
@@ -312,69 +317,69 @@ func TestGetSet(t *testing.T, newDB func() (kvdb.KVDB, error)) {
 		}
 	})
 
-	// t.Run("MultiWithExpire", func(t *testing.T) {
-	// 	db, err := newDB()
-	// 	if err != nil {
-	// 		panic(err)
-	// 	}
-	// 	defer func() {
-	// 		err := db.Close()
-	// 		if err != nil {
-	// 			panic(err)
-	// 		}
-	// 	}()
-	// 	err = db.SetMulti(kvs[:4], kvdb.SetExpire(time.Now().Add(ExpireAfter)))
-	// 	if err != nil {
-	// 		t.Error(err)
-	// 		t.Fail()
-	// 	}
-	// 	err = db.SetMulti(kvs[4:], kvdb.SetExpire(time.Now().Add(time.Minute)))
-	// 	if err != nil {
-	// 		t.Error(err)
-	// 		t.Fail()
-	// 	}
+	t.Run("MultiWithExpire", func(t *testing.T) {
+		db, err := newDB()
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			err := db.Close()
+			if err != nil {
+				panic(err)
+			}
+		}()
+		err = db.SetMulti(kvs[:4], kvdb.SetExpire(time.Now().Add(ExpireAfter)))
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+		err = db.SetMulti(kvs[4:], kvdb.SetExpire(time.Now().Add(time.Minute)))
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
 
-	// 	var keys []string
-	// 	for i := 0; i < len(kvs); i += 2 {
-	// 		keys = append(keys, kvs[i])
-	// 	}
-	// 	rsts, err := db.GetMulti(keys)
-	// 	if err != nil {
-	// 		t.Error(err)
-	// 		t.Fail()
-	// 	}
-	// 	if len(rsts) != len(kvs)/2 {
-	// 		t.Errorf("length of results not right, expect %v, got %v",
-	// 			len(kvs)/2, len(rsts))
-	// 		t.Fail()
-	// 	}
-	// 	for i := 0; i < len(kvs); i += 2 {
-	// 		if rsts[kvs[i]].Value != kvs[i+1] {
-	// 			t.Errorf("value not right, expect %s, got %s",
-	// 				kvs[i+1], rsts[kvs[i]].Value)
-	// 			t.Fail()
-	// 		}
-	// 	}
+		var keys []string
+		for i := 0; i < len(kvs); i += 2 {
+			keys = append(keys, kvs[i])
+		}
+		rsts, err := db.GetMulti(keys)
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+		if len(rsts) != len(kvs)/2 {
+			t.Errorf("length of results not right, expect %v, got %v",
+				len(kvs)/2, len(rsts))
+			t.Fail()
+		}
+		for i := 0; i < len(kvs); i += 2 {
+			if rsts[kvs[i]].Value != kvs[i+1] {
+				t.Errorf("value not right, expect %s, got %s",
+					kvs[i+1], rsts[kvs[i]].Value)
+				t.Fail()
+			}
+		}
 
-	// 	time.Sleep(ExpireAfter * 2)
-	// 	rsts, err = db.GetMulti(keys)
-	// 	if err != nil {
-	// 		t.Error(err)
-	// 		t.Fail()
-	// 	}
-	// 	if len(rsts) != (len(kvs)-4)/2 {
-	// 		t.Errorf("length of results not right, expect %v, got %v",
-	// 			(len(kvs)-4)/2, len(rsts))
-	// 		t.Fail()
-	// 	}
-	// 	for i := 4; i < len(kvs); i += 2 {
-	// 		if rsts[kvs[i]].Value != kvs[i+1] {
-	// 			t.Errorf("value not right, expect %s, got %s",
-	// 				kvs[i+1], rsts[kvs[i]].Value)
-	// 			t.Fail()
-	// 		}
-	// 	}
-	// })
+		time.Sleep(ExpireAfter * 2)
+		rsts, err = db.GetMulti(keys)
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+		if len(rsts) != (len(kvs)-4)/2 {
+			t.Errorf("length of results not right, expect %v, got %v",
+				(len(kvs)-4)/2, len(rsts))
+			t.Fail()
+		}
+		for i := 4; i < len(kvs); i += 2 {
+			if rsts[kvs[i]].Value != kvs[i+1] {
+				t.Errorf("value not right, expect %s, got %s",
+					kvs[i+1], rsts[kvs[i]].Value)
+				t.Fail()
+			}
+		}
+	})
 }
 
 func TestDelete(t *testing.T, newDB func() (kvdb.KVDB, error)) {

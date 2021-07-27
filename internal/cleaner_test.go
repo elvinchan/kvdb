@@ -81,7 +81,7 @@ func TestTick(t *testing.T) {
 func TestStartClean(t *testing.T) {
 	var (
 		r = LoadRec{
-			recordCycle: time.Millisecond,
+			recordCycle: time.Millisecond * 10,
 			cleanPeriod: 5,
 		}
 		cleanCnt int

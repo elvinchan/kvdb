@@ -118,7 +118,9 @@ func (g *rdb) Get(key string, opts ...kvdb.GetOption) (*kvdb.Node, error) {
 	if gt.Children {
 		var rows []rdbNode
 		err = g.db.Where("parent_key = ?", key).
-			Where("key > ?", gt.Start).
+			Where("key > ?", g.option.FullKey(
+				g.option.BareKey(gt.Start), row.Key),
+			).
 			Where("expire_at > ?", now).
 			Limit(gt.Limit).
 			Find(&rows).Error
