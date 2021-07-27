@@ -10,7 +10,7 @@ A tree like structure key value database powered by SQLite, LevelDB, MongoDB etc
 ## Getting Started
 
 ### Simple local usage
-```
+```go
 // Create A KVDB instance using RDB or LevelDB backend
 db, err := rdb.NewDB(rdb.DriverSqlite3, "sqlite.db")
 if err != nil {
@@ -32,7 +32,7 @@ fmt.Println("value is:", rst.Value) // should be v
 Some DB like SQLite and LevelDB does not provide a server for remote connect, which means unavailable for a common data source for distributed services. KVDB provide a service layer so you can easily use it in other process or a remote program.
 
 - Server side
-```
+```go
 db, err := rdb.NewDB(rdb.DriverSqlite3, "sqlite.db")
 if err != nil {
     panic(err)
@@ -46,7 +46,7 @@ if err != nil {
 ```
 
 - Client side
-```
+```go
 db, err := service.DialKVDBService("tcp", ":9090")
 if err != nil {
     panic(err)
@@ -87,7 +87,7 @@ a.b2.c4
 ```
 
 Then when using `Get/GetMulti`, you can also retrieve children (not grand children) key-values  
-```
+```go
 rst, err := db.Get("a", kvdb.GetChildren("", 2))
 if err != nil {
     panic(err)
@@ -101,7 +101,7 @@ for k, v := range rst.Children {
 
 ### TTL
 KVDB support time to live for key, you can set expire time when using `Set/SetMulti`
-```
+```go
 err = db.Set("k", "v",  kvdb.SetExpire(time.Now()))
 if err != nil {
     panic(err)
@@ -115,7 +115,7 @@ fmt.Println("result is:", rst) // should be nil
 ```
 
 KVDB would not delete expired key-value data until you called `Cleanup`. Or you can enable auto cleanup, which will cleanup periodically.
-```
+```go
 rdb.NewDB(rdb.DriverSqlite3, "sqlite.db", kvdb.AutoClean())
 ```
 
