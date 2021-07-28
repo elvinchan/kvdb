@@ -5,6 +5,18 @@ import "testing"
 func TestDBOptions(t *testing.T) {
 	o := InitOption()
 
+	parentKey := o.ParentKey("a.b.c")
+	if parentKey != "a.b" {
+		t.Errorf("parentKey not right, expect %s, got %s", "a.b", parentKey)
+		t.Fail()
+	}
+
+	parentKey = o.ParentKey("a")
+	if parentKey != "" {
+		t.Errorf("parentKey not right, expect %s, got %s", "", parentKey)
+		t.Fail()
+	}
+
 	parentBareKey := o.ParentBareKey("a.b.c")
 	if parentBareKey != "b" {
 		t.Errorf("parentBareKey not right, expect %s, got %s", "b", parentBareKey)

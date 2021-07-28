@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -11,10 +12,16 @@ import (
 )
 
 type MockDB struct {
-	store map[string]string
+	store   map[string]string
+	mockErr error
+	errCnt  int
 }
 
 func (db *MockDB) Get(key string, opts ...kvdb.GetOption) (*kvdb.Node, error) {
+	if db.mockErr != nil {
+		db.errCnt++
+		return nil, db.mockErr
+	}
 	value, ok := db.store[key]
 	if ok {
 		return &kvdb.Node{Value: value}, nil
@@ -34,6 +41,10 @@ func (db *MockDB) GetMulti(keys []string, opts ...kvdb.GetOption) (map[string]kv
 }
 
 func (db *MockDB) Set(key, value string, opts ...kvdb.SetOption) error {
+	if db.mockErr != nil {
+		db.errCnt++
+		return db.mockErr
+	}
 	db.store[key] = value
 	return nil
 }
@@ -89,6 +100,12 @@ func TestServer(t *testing.T) {
 		t.Error(err)
 		t.Fail()
 	}
+	defer func() {
+		if err := db.(*service.KVDBClient).Close(); err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+	}()
 
 	key := "service.g"
 	value := "0"
@@ -200,6 +217,68 @@ func TestServer(t *testing.T) {
 	}
 	if rst != nil {
 		t.Errorf("result not right, expect nil")
+		t.Fail()
+	}
+}
+
+func TestRetry(t *testing.T) {
+	defer os.Remove(SockFile)
+	mockDB := &MockDB{
+		store: make(map[string]string),
+	}
+	go func() {
+		err := server.StartServer(mockDB, "unix", SockFile)
+		if err != nil {
+			panic(err)
+		}
+	}()
+	time.Sleep(time.Millisecond * 100)
+	db, err := service.DialKVDBService("unix", SockFile)
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+	defer func() {
+		if err := db.(*service.KVDBClient).Close(); err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+	}()
+
+	key := "service.r"
+	value := "0"
+	err = db.Set(key, value)
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+
+	if mockDB.errCnt != 0 {
+		t.Errorf("error count not right, expect %d, got %d", 0, mockDB.errCnt)
+		t.Fail()
+	}
+
+	mockDB.mockErr = errors.New("mock error")
+	// let no error after 1 retry
+	go func() {
+		time.Sleep(time.Millisecond * 200)
+		mockDB.mockErr = nil
+	}()
+	rst, err := db.Get(key)
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+	if rst == nil {
+		t.Errorf("result not right, expect not nil")
+		t.Fail()
+	} else if rst.Value != value {
+		t.Errorf("result not right, expect %s, got %s", value, rst.Value)
+		t.Fail()
+	}
+
+	if mockDB.errCnt != 1 {
+		t.Errorf("error count not right, expect %d, got %d", 1, mockDB.errCnt)
 		t.Fail()
 	}
 }
