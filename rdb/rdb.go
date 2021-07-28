@@ -35,13 +35,15 @@ type rdbNode struct {
 	ExpireAt  time.Time `gorm:"index"`
 }
 
+type DriverType int
+
 const (
-	DriverSqlite3 = iota
+	DriverSqlite3 DriverType = iota
 	DriverMySQL
 	DriverPostgres
 )
 
-func NewDB(driver int, dsn string, opts ...kvdb.DBOption) (kvdb.KVDB, error) {
+func NewDB(driver DriverType, dsn string, opts ...kvdb.DBOption) (kvdb.KVDB, error) {
 	o := kvdb.InitOption()
 	for _, opt := range opts {
 		opt(o)
@@ -104,8 +106,9 @@ func (g *rdb) Get(key string, opts ...kvdb.GetOption) (*kvdb.Node, error) {
 	}
 	now := time.Now()
 	defer g.hookReq(time.Since(now))
-	row := rdbNode{Key: key}
-	err := g.db.Where("expire_at > ?", now).Take(&row).Error
+	var row rdbNode
+	err := g.db.Where("expire_at > ?", now).Where("key = ?", key).
+		Take(&row).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -144,6 +147,9 @@ func (g *rdb) GetMulti(keys []string, opts ...kvdb.GetOption,
 	if gt.Children && gt.Limit == 0 {
 		gt.Limit = g.option.DefaultLimit
 	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
 	now := time.Now()
 	defer g.hookReq(time.Since(now))
 	var rows []rdbNode
@@ -164,7 +170,9 @@ func (g *rdb) GetMulti(keys []string, opts ...kvdb.GetOption,
 		if gt.Children && (isBareStartKey || parentStartKey == row.Key) {
 			var rows []rdbNode
 			err = g.db.Where("parent_key = ?", row.Key).
-				Where("key > ?", g.option.FullKey(g.option.BareKey(gt.Start), row.Key)).
+				Where("key > ?", g.option.FullKey(
+					g.option.BareKey(gt.Start), row.Key),
+				).
 				Where("expire_at > ?", now).
 				Limit(gt.Limit).
 				Find(&rows).Error
@@ -211,7 +219,7 @@ func (g *rdb) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
 		st.ExpireAt = maxDatetime
 	}
 	if len(kvPairs)%2 != 0 {
-		return errors.New("invalid key value pairs count")
+		return kvdb.ErrorKeyValuePairs
 	}
 	now := time.Now()
 	defer g.hookReq(time.Since(now))
@@ -244,12 +252,12 @@ func (g *rdb) Delete(key string, opts ...kvdb.DeleteOption) error {
 }
 
 func (g *rdb) DeleteMulti(keys []string, opts ...kvdb.DeleteOption) error {
-	if len(keys) == 0 {
-		return nil
-	}
 	var dt kvdb.Deleter
 	for _, opt := range opts {
 		opt(&dt)
+	}
+	if len(keys) == 0 {
+		return nil
 	}
 	now := time.Now()
 	defer g.hookReq(time.Since(now))

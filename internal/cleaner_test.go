@@ -27,7 +27,7 @@ func TestHookReq(t *testing.T) {
 
 func TestTick(t *testing.T) {
 	t.Run("Empty", func(t *testing.T) {
-		expect := 100
+		expect := 200
 		var r LoadRec
 		for i := 0; i < expect; i++ {
 			go func() {

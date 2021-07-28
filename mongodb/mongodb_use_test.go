@@ -14,20 +14,30 @@ func newDB() (kvdb.KVDB, error) {
 }
 
 func TestNewDB(t *testing.T) {
-	db, err := newDB()
-	if err != nil {
-		t.Error(err)
-		t.Fail()
-	}
-	if db == nil {
-		t.Errorf("db is nil")
-		t.Fail()
-	}
-	err = db.Close()
-	if err != nil {
-		t.Error(err)
-		t.Fail()
-	}
+	t.Run("Normal", func(t *testing.T) {
+		db, err := newDB()
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+		if db == nil {
+			t.Errorf("db is nil")
+			t.Fail()
+		}
+		err = db.Close()
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+	})
+
+	t.Run("Abnormal", func(t *testing.T) {
+		_, err := mongodb.NewDB("", "", "")
+		if err == nil {
+			t.Error("err not right, expect not nil")
+			t.Fail()
+		}
+	})
 }
 
 func TestGetSet(t *testing.T) {

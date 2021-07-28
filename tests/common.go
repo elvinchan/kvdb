@@ -215,6 +215,12 @@ func TestGetSet(t *testing.T, newDB func() (kvdb.KVDB, error)) {
 				5: {},
 			}, "", -1},
 			{map[int][]int{
+				0: {1, 2},
+				1: {},
+				3: {5, 6},
+				5: {},
+			}, "", 0},
+			{map[int][]int{
 				0: {4},
 				1: {},
 				3: {},
@@ -378,6 +384,52 @@ func TestGetSet(t *testing.T, newDB func() (kvdb.KVDB, error)) {
 					kvs[i+1], rsts[kvs[i]].Value)
 				t.Fail()
 			}
+		}
+	})
+
+	t.Run("Abnormal", func(t *testing.T) {
+		db, err := newDB()
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			err := db.Close()
+			if err != nil {
+				panic(err)
+			}
+		}()
+		err = db.SetMulti(kvs[:3])
+		if err != kvdb.ErrorKeyValuePairs {
+			t.Errorf("err not right, expect %s, got %s",
+				kvdb.ErrorKeyValuePairs, err)
+			t.Fail()
+		}
+	})
+
+	t.Run("BlankKey", func(t *testing.T) {
+		db, err := newDB()
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			err := db.Close()
+			if err != nil {
+				panic(err)
+			}
+		}()
+		err = db.Set("", "1")
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+		rst, err := db.Get("")
+		if err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+		if rst == nil || rst.Value != "1" {
+			t.Errorf("result not right, expect %s, got %s", "1", rst.Value)
+			t.Fail()
 		}
 	})
 }

@@ -2,7 +2,6 @@ package mongodb
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/elvinchan/kvdb"
@@ -97,6 +96,9 @@ func (m *mongoDB) GetMulti(keys []string, opts ...kvdb.GetOption,
 	if gt.Children && gt.Limit == 0 {
 		gt.Limit = m.option.DefaultLimit
 	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
 	now := time.Now()
 	defer m.hookReq(time.Since(now))
 	cur, err := m.collection.Find(
@@ -176,6 +178,8 @@ func (m *mongoDB) Set(key, value string, opts ...kvdb.SetOption) error {
 	if st.ExpireAt.IsZero() {
 		st.ExpireAt = maxDatetime
 	}
+	now := time.Now()
+	defer m.hookReq(time.Since(now))
 	_, err := m.collection.UpdateByID(context.TODO(),
 		key,
 		bson.D{
@@ -198,7 +202,7 @@ func (m *mongoDB) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
 		st.ExpireAt = maxDatetime
 	}
 	if len(kvPairs)%2 != 0 {
-		return errors.New("invalid key value pairs count")
+		return kvdb.ErrorKeyValuePairs
 	}
 	now := time.Now()
 	defer m.hookReq(time.Since(now))
@@ -220,25 +224,13 @@ func (m *mongoDB) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
 	return err
 }
 
-func (m *mongoDB) Exist(key string) (bool, error) {
-	var result bson.M
-	err := m.collection.FindOne(context.TODO(), bson.D{{
-		Key: "_id", Value: key,
-	}}).Decode(&result)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
 func (m *mongoDB) Delete(key string, opts ...kvdb.DeleteOption) error {
 	var dt kvdb.Deleter
 	for _, opt := range opts {
 		opt(&dt)
 	}
+	now := time.Now()
+	defer m.hookReq(time.Since(now))
 	filter := bson.D{
 		{Key: "_id", Value: key},
 	}
@@ -259,6 +251,11 @@ func (m *mongoDB) DeleteMulti(keys []string, opts ...kvdb.DeleteOption) error {
 	for _, opt := range opts {
 		opt(&dt)
 	}
+	if len(keys) == 0 {
+		return nil
+	}
+	now := time.Now()
+	defer m.hookReq(time.Since(now))
 	var ids bson.A
 	for _, key := range keys {
 		ids = append(ids, key)
@@ -282,6 +279,22 @@ func (m *mongoDB) DeleteMulti(keys []string, opts ...kvdb.DeleteOption) error {
 	}
 	_, err := m.collection.DeleteMany(context.TODO(), filter)
 	return err
+}
+
+func (m *mongoDB) Exist(key string) (bool, error) {
+	now := time.Now()
+	defer m.hookReq(time.Since(now))
+	var result bson.M
+	err := m.collection.FindOne(context.TODO(), bson.D{{
+		Key: "_id", Value: key,
+	}}).Decode(&result)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (m *mongoDB) Cleanup() error {

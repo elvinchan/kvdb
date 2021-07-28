@@ -1,7 +1,12 @@
 package kvdb
 
 import (
+	"errors"
 	"time"
+)
+
+var (
+	ErrorKeyValuePairs = errors.New("invalid key value pairs")
 )
 
 type Node struct {

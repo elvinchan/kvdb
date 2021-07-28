@@ -28,6 +28,9 @@ func NewDB(path string, opts ...kvdb.DBOption) (kvdb.KVDB, error) {
 		opt(o)
 	}
 	db, err := leveldb.OpenFile(path, nil)
+	if err != nil {
+		return nil, err
+	}
 	v := levelDB{
 		db:      db,
 		option:  o,
@@ -60,7 +63,7 @@ func (l *levelDB) Get(key string, opts ...kvdb.GetOption,
 	}
 	now := time.Now()
 	defer l.hookReq(time.Since(now))
-	node, deleteKeys, err := l.get(key, &gt)
+	node, deleteKeys, err := l.get(key, now, &gt)
 	if err != nil {
 		return nil, err
 	}
@@ -79,6 +82,9 @@ func (l *levelDB) GetMulti(keys []string, opts ...kvdb.GetOption,
 	if gt.Children && gt.Limit == 0 {
 		gt.Limit = l.option.DefaultLimit
 	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
 	now := time.Now()
 	defer l.hookReq(time.Since(now))
 	var (
@@ -86,7 +92,7 @@ func (l *levelDB) GetMulti(keys []string, opts ...kvdb.GetOption,
 		deleteKeys []string
 	)
 	for i := range keys {
-		node, dks, err := l.get(keys[i], &gt)
+		node, dks, err := l.get(keys[i], now, &gt)
 		if err != nil {
 			return nil, err
 		}
@@ -102,7 +108,7 @@ func (l *levelDB) GetMulti(keys []string, opts ...kvdb.GetOption,
 	return v, err
 }
 
-func (l *levelDB) get(key string, gt *kvdb.Getter,
+func (l *levelDB) get(key string, now time.Time, gt *kvdb.Getter,
 ) (*kvdb.Node, []string, error) {
 	v, err := l.db.Get(l.mask(key), nil)
 	if err != nil {
@@ -112,7 +118,6 @@ func (l *levelDB) get(key string, gt *kvdb.Getter,
 		return nil, nil, err
 	}
 	var deleteKeys []string
-	now := time.Now()
 	retrive := func(key string, data []byte) (*string, error) {
 		n, err := l.decode(data)
 		if err != nil {
@@ -206,7 +211,7 @@ func (l *levelDB) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
 		opt(&st)
 	}
 	if len(kvPairs)%2 != 0 {
-		return errors.New("invalid key value pairs count")
+		return kvdb.ErrorKeyValuePairs
 	}
 	now := time.Now()
 	defer l.hookReq(time.Since(now))
@@ -219,12 +224,6 @@ func (l *levelDB) SetMulti(kvPairs []string, opts ...kvdb.SetOption) error {
 		batch.Put(l.mask(kvPairs[i*2]), v)
 	}
 	return l.db.Write(batch, nil)
-}
-
-func (l *levelDB) Exist(key string) (bool, error) {
-	now := time.Now()
-	defer l.hookReq(time.Since(now))
-	return l.db.Has(l.mask(key), nil)
 }
 
 func (l *levelDB) Delete(key string, opts ...kvdb.DeleteOption) error {
@@ -281,6 +280,12 @@ func (l *levelDB) deleteMulti(keys []string, dt *kvdb.Deleter) error {
 		iter.Release()
 	}
 	return l.db.Write(batch, nil)
+}
+
+func (l *levelDB) Exist(key string) (bool, error) {
+	now := time.Now()
+	defer l.hookReq(time.Since(now))
+	return l.db.Has(l.mask(key), nil)
 }
 
 func (l *levelDB) Cleanup() error {
