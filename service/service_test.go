@@ -3,6 +3,7 @@ package service_test
 import (
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,9 +16,12 @@ type MockDB struct {
 	store   map[string]string
 	mockErr error
 	errCnt  int
+	mu      sync.Mutex
 }
 
 func (db *MockDB) Get(key string, opts ...kvdb.GetOption) (*kvdb.Node, error) {
+	db.mu.Lock()
+	defer db.mu.Unlock()
 	if db.mockErr != nil {
 		db.errCnt++
 		return nil, db.mockErr
@@ -41,6 +45,8 @@ func (db *MockDB) GetMulti(keys []string, opts ...kvdb.GetOption) (map[string]kv
 }
 
 func (db *MockDB) Set(key, value string, opts ...kvdb.SetOption) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
 	if db.mockErr != nil {
 		db.errCnt++
 		return db.mockErr
@@ -82,20 +88,19 @@ func (db *MockDB) Close() error {
 	return nil
 }
 
-const SockFile = "testdb.sock"
-
 func TestServer(t *testing.T) {
-	defer os.Remove(SockFile)
+	sockFile := "test.sock"
+	defer os.Remove(sockFile)
 	go func() {
 		err := server.StartServer(&MockDB{
 			store: make(map[string]string),
-		}, "unix", SockFile)
+		}, "unix", sockFile)
 		if err != nil {
 			panic(err)
 		}
 	}()
 	time.Sleep(time.Millisecond * 100)
-	db, err := service.DialKVDBService("unix", SockFile)
+	db, err := service.DialKVDBService("unix", sockFile)
 	if err != nil {
 		t.Error(err)
 		t.Fail()
@@ -222,18 +227,20 @@ func TestServer(t *testing.T) {
 }
 
 func TestRetry(t *testing.T) {
-	defer os.Remove(SockFile)
+	sockFile := "test_retry.sock"
+	defer os.Remove(sockFile)
 	mockDB := &MockDB{
 		store: make(map[string]string),
+		mu:    sync.Mutex{},
 	}
 	go func() {
-		err := server.StartServer(mockDB, "unix", SockFile)
+		err := server.StartServer(mockDB, "unix", sockFile)
 		if err != nil {
 			panic(err)
 		}
 	}()
 	time.Sleep(time.Millisecond * 100)
-	db, err := service.DialKVDBService("unix", SockFile)
+	db, err := service.DialKVDBService("unix", sockFile)
 	if err != nil {
 		t.Error(err)
 		t.Fail()
@@ -253,16 +260,23 @@ func TestRetry(t *testing.T) {
 		t.Fail()
 	}
 
+	mockDB.mu.Lock()
 	if mockDB.errCnt != 0 {
 		t.Errorf("error count not right, expect %d, got %d", 0, mockDB.errCnt)
 		t.Fail()
 	}
+	mockDB.mu.Unlock()
 
+	mockDB.mu.Lock()
 	mockDB.mockErr = errors.New("mock error")
+	mockDB.mu.Unlock()
+
 	// let no error after 1 retry
 	go func() {
 		time.Sleep(time.Millisecond * 200)
+		mockDB.mu.Lock()
 		mockDB.mockErr = nil
+		mockDB.mu.Unlock()
 	}()
 	rst, err := db.Get(key)
 	if err != nil {
@@ -277,8 +291,10 @@ func TestRetry(t *testing.T) {
 		t.Fail()
 	}
 
+	mockDB.mu.Lock()
 	if mockDB.errCnt != 1 {
 		t.Errorf("error count not right, expect %d, got %d", 1, mockDB.errCnt)
 		t.Fail()
 	}
+	mockDB.mu.Unlock()
 }
